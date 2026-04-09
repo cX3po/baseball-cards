@@ -11,8 +11,14 @@ import base64
 import pandas as pd
 from datetime import datetime
 
-# Load API key from axiom .env
+# Load API key - check Streamlit secrets, then axiom .env, then env var
 def load_api_key():
+    # Streamlit Cloud secrets
+    try:
+        key = st.secrets.get("ANTHROPIC_API_KEY", "")
+        if key: return key
+    except: pass
+    # Local axiom .env
     env_path = os.path.expanduser("~/axiom/.env")
     if os.path.exists(env_path):
         with open(env_path) as f:
