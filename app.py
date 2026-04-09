@@ -194,37 +194,66 @@ PHOTO_GUIDE_SVG = """
 
 # ── AI Chat Helper ───────────────────────────────────────────────────────────
 
-def chat_with_ai(message, context=""):
-    """Send a chat message to Claude about baseball cards."""
+def chat_with_ax(message, context="", history=None, app_type="baseball"):
+    """Send a chat message to AX - Phil's family AI assistant."""
     import requests
     if not API_KEY:
-        return "No API key found. Set ANTHROPIC_API_KEY in ~/axiom/.env"
+        return "No API key found. Add your ANTHROPIC_API_KEY in the app settings."
 
-    system = """You are a baseball card expert assistant. You help with:
-- Card identification and pricing
-- Condition grading advice
-- Collection management tips
-- Market trends and investment advice
-- Historical context about cards and players
+    personas = {
+        "baseball": """You are AX, a friendly and knowledgeable AI assistant for the family.
+You're an expert in baseball cards - identification, pricing, grading, history, and selling.
+You help with card values, condition grading advice, collection management, and market trends.
+Be warm and helpful - you're talking to family members who may not be card experts.
+If asked about a specific card value, be honest about uncertainty. Never invent prices.
+If someone asks how to sell, give practical eBay/auction house advice.""",
+        "trains": """You are AX, a friendly and knowledgeable AI assistant for the family.
+You're an expert in model trains and railroadiana - identification, pricing, brands, scales, and selling.
+You know Lionel, American Flyer, HO scale, N scale, O gauge, G scale, brass models, vintage tinplate.
+Help identify trains from photos, estimate values, and advise on selling via auction houses or eBay.
+Be warm and helpful - you're talking to family members.""",
+        "general": """You are AX, a friendly and knowledgeable AI assistant for the family.
+You help with collectibles, identification, pricing, and selling advice.
+Be warm, practical, and honest about what you know and don't know."""
+    }
 
-Be concise and practical. If asked about a specific card value, be honest about uncertainty.
-Never invent prices - say "I'd need to look that up" if unsure."""
-
+    system = personas.get(app_type, personas["general"])
     if context:
-        system += f"\n\nCollection context: {context}"
+        system += f"\n\nContext: {context}"
+
+    messages = []
+    if history:
+        for msg in history[-10:]:  # Last 10 messages for context
+            messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": message})
 
     try:
         resp = requests.post("https://api.anthropic.com/v1/messages",
             headers={"x-api-key": API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
             json={"model": "claude-haiku-4-5-20251001", "max_tokens": 1024,
-                  "system": system,
-                  "messages": [{"role": "user", "content": message}]},
+                  "system": system, "messages": messages},
             timeout=30)
         if resp.ok:
             return resp.json()["content"][0]["text"]
         return f"API error: {resp.status_code}"
     except Exception as e:
         return f"Error: {e}"
+
+def generate_sell_listing(card_info):
+    """Generate an eBay/auction listing for a card."""
+    prompt = f"""Create a ready-to-use eBay listing for this baseball card:
+{card_info}
+
+Include:
+1. **Title** (80 chars max, include year, brand, player, card #, condition keywords)
+2. **Description** (detailed, mentions condition, any notable features)
+3. **Category suggestion** (eBay category)
+4. **Starting price suggestion** (based on the card)
+5. **Shipping notes** (how to ship a card safely)
+6. **Tags/keywords** for search visibility
+
+Format it so it can be copy-pasted directly into eBay."""
+    return chat_with_ax(prompt, app_type="baseball")
 
 # ── Main App ─────────────────────────────────────────────────────────────────
 
@@ -261,9 +290,9 @@ def main():
         st.markdown(f"**Notable:** {stats['notable']:,} | **Priced:** {stats['with_values']:,}")
 
     # Tabs
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "Collection", "Card Scanner", "AI Assistant",
-        "Valuable Cards", "Stats", "Import/Export"
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "Collection", "Card Scanner", "Ask AX",
+        "Sell Cards", "Valuable Cards", "Stats", "Import/Export"
     ])
 
     # ── TAB 1: Full Editable Spreadsheet ──
@@ -359,7 +388,7 @@ def main():
                 search_player = st.text_input("Quick value search", placeholder="e.g. 1956 Topps Ted Williams")
                 if search_player and st.button("Search Value"):
                     with st.spinner("Searching..."):
-                        result = chat_with_ai(
+                        result = chat_with_ax(
                             f"What is the current market value of a {search_player} baseball card? "
                             f"Give raw ungraded value and PSA 9/10 values if known. Be concise.",
                         )
@@ -471,29 +500,31 @@ def main():
                     except Exception as e:
                         st.error(f"Scan error: {e}")
 
-    # ── TAB 3: AI Chat ──
+    # ── TAB 3: Ask AX ──
     with tab3:
-        st.subheader("AI Card Expert")
-        st.caption("Ask anything about baseball cards, values, grading, or your collection.")
+        st.subheader("Ask AX")
+        st.caption("Your family AI assistant. Ask about cards, values, grading, selling - anything.")
 
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
 
         # Display chat history
         for msg in st.session_state.chat_history:
-            with st.chat_message(msg["role"]):
+            role_name = "AX" if msg["role"] == "assistant" else "You"
+            avatar = "\U0001f916" if msg["role"] == "assistant" else "\U0001f9d1"
+            with st.chat_message(msg["role"], avatar=avatar):
                 st.markdown(msg["content"])
 
         # Chat input
-        if prompt := st.chat_input("Ask about a card, value, or grading..."):
+        if prompt := st.chat_input("Ask AX anything about your cards..."):
             st.session_state.chat_history.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
+            with st.chat_message("user", avatar="\U0001f9d1"):
                 st.markdown(prompt)
 
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    context = f"Phil has {stats['total']} cards in his collection, spanning years {stats['years'][0] if stats['years'] else '?'} to {stats['years'][-1] if stats['years'] else '?'}. Companies: {', '.join(stats['companies'][:5])}."
-                    response = chat_with_ai(prompt, context)
+            with st.chat_message("assistant", avatar="\U0001f916"):
+                with st.spinner("AX is thinking..."):
+                    context = f"Collection has {stats['total']} cards, spanning {stats['years'][0] if stats['years'] else '?'} to {stats['years'][-1] if stats['years'] else '?'}. Companies: {', '.join(stats['companies'][:5])}."
+                    response = chat_with_ax(prompt, context, history=st.session_state.chat_history, app_type="baseball")
                     st.markdown(response)
                     st.session_state.chat_history.append({"role": "assistant", "content": response})
 
@@ -501,8 +532,79 @@ def main():
             st.session_state.chat_history = []
             st.rerun()
 
-    # ── TAB 4: Valuable Cards ──
+    # ── TAB 4: Sell Cards ──
     with tab4:
+        st.subheader("Sell Your Cards")
+        st.markdown("Generate ready-to-use eBay listings or auction house submissions.")
+
+        sell_col1, sell_col2 = st.columns([1, 1])
+
+        with sell_col1:
+            st.markdown("### Create a Listing")
+            sell_method = st.radio("Sell via", ["eBay", "Auction House", "Local Card Shop"], horizontal=True)
+
+            # Manual entry
+            sell_player = st.text_input("Player Name", placeholder="e.g. Ken Griffey Jr.")
+            sell_scol1, sell_scol2, sell_scol3 = st.columns(3)
+            with sell_scol1:
+                sell_year = st.text_input("Year", placeholder="1989")
+            with sell_scol2:
+                sell_set = st.text_input("Card Set", placeholder="Upper Deck")
+            with sell_scol3:
+                sell_number = st.text_input("Card #", placeholder="1")
+            sell_condition = st.selectbox("Condition", ["Mint", "Near Mint", "Excellent", "Good", "Fair", "Poor"])
+            sell_notes = st.text_input("Additional notes", placeholder="Rookie card, centered, clean corners")
+
+            if st.button("Generate Listing", type="primary"):
+                if sell_player:
+                    card_info = f"{sell_year} {sell_set} #{sell_number} {sell_player} - Condition: {sell_condition}. {sell_notes}"
+                    with st.spinner("AX is writing your listing..."):
+                        if sell_method == "eBay":
+                            listing = generate_sell_listing(card_info)
+                        elif sell_method == "Auction House":
+                            listing = chat_with_ax(
+                                f"Write a professional auction house submission letter for this card: {card_info}. "
+                                f"Include: item description, provenance (from personal collection), condition notes, "
+                                f"and suggest which auction houses specialize in sports cards (Heritage Auctions, "
+                                f"Goldin Auctions, REA, Lelands). Format as a ready-to-send email.",
+                                app_type="baseball")
+                        else:
+                            listing = chat_with_ax(
+                                f"Write a description card for bringing this to a local card shop: {card_info}. "
+                                f"Include what to ask for, what price to expect, and negotiation tips.",
+                                app_type="baseball")
+                        st.session_state["last_listing"] = listing
+                else:
+                    st.warning("Enter a player name.")
+
+        with sell_col2:
+            st.markdown("### Your Listing")
+            if "last_listing" in st.session_state:
+                st.markdown(st.session_state["last_listing"])
+                st.download_button("Copy as Text File",
+                    st.session_state["last_listing"],
+                    f"listing_{sell_player}_{sell_year}.txt" if sell_player else "listing.txt",
+                    "text/plain")
+            else:
+                st.info("Fill in the card details and click 'Generate Listing' to create a sell-ready description.")
+
+        st.markdown("---")
+        st.markdown("### Sell from Collection")
+        st.caption("Select a card from your collection to generate a listing.")
+        conn = get_db()
+        sellable = pd.read_sql_query(
+            "SELECT id, card_number, year, player, company, value_raw FROM cards WHERE player != '' ORDER BY year", conn)
+        conn.close()
+        if not sellable.empty:
+            selected_card = st.selectbox("Pick a card",
+                sellable.apply(lambda r: f"#{r['card_number']} {r['year']} {r['company']} {r['player']} ({r['value_raw'] or 'no price'})", axis=1))
+            if selected_card and st.button("Generate Listing for This Card"):
+                with st.spinner("AX is writing..."):
+                    listing = generate_sell_listing(selected_card)
+                    st.markdown(listing)
+
+    # ── TAB 5: Valuable Cards ──
+    with tab5:
         st.subheader("Notable & Valuable Cards")
         conn = get_db()
         val_df = pd.read_sql_query("""
@@ -520,8 +622,8 @@ def main():
             st.markdown(f"**{len(val_df)} notable cards** in your collection")
             st.dataframe(val_df.drop(columns=["id"]), use_container_width=True, height=600)
 
-    # ── TAB 5: Stats ──
-    with tab5:
+    # ── TAB 6: Stats ──
+    with tab6:
         st.subheader("Collection Statistics")
         c1,c2,c3,c4 = st.columns(4)
         c1.metric("Entries", f"{stats['total']:,}")
@@ -545,8 +647,8 @@ def main():
                 st.subheader("Top Teams")
                 st.bar_chart(td.set_index("team")["count"])
 
-    # ── TAB 6: Import/Export ──
-    with tab6:
+    # ── TAB 7: Import/Export ──
+    with tab7:
         st.subheader("Import / Export")
 
         imp_col, exp_col = st.columns(2)
