@@ -1,6 +1,6 @@
 venv/
 __pycache__/
 *.pyc
-db/cards.db
+#db/cards.db  # pre-loaded with 8580 cards
 .env
 *.log
