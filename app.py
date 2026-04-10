@@ -418,87 +418,104 @@ def main():
             """)
 
         uploaded_photos = st.file_uploader(
-            "Upload card photo(s)", type=["jpg","jpeg","png","webp"],
+            "Upload card photo(s) - scan one or many at once",
+            type=["jpg","jpeg","png","webp"],
             accept_multiple_files=True)
 
         scan_mode = st.radio("Scan mode",
             ["Identify + Grade + Value", "Condition Grade Only"], horizontal=True)
 
-        if uploaded_photos and st.button("Scan Card", type="primary"):
+        if uploaded_photos:
+            st.caption(f"{len(uploaded_photos)} photo(s) selected")
+
+        if uploaded_photos and st.button("Scan All Cards", type="primary"):
             if not API_KEY:
-                st.error("No API key. Set ANTHROPIC_API_KEY in ~/axiom/.env")
+                st.error("No API key. Add ANTHROPIC_API_KEY in app settings.")
             else:
-                with st.spinner("Analyzing card..."):
-                    try:
-                        from engine import VisionEngine
-                        from card_prompts import CARD_IDENTIFIER, CARD_CONDITION_ONLY
+                try:
+                    from engine import VisionEngine
+                    from card_prompts import CARD_IDENTIFIER, CARD_CONDITION_ONLY
+                    engine = VisionEngine(provider="haiku")
+                    prompt = CARD_IDENTIFIER if scan_mode.startswith("Identify") else CARD_CONDITION_ONLY
 
-                        engine = VisionEngine(provider="haiku")
-                        photo = uploaded_photos[0]
+                    all_scans = []
+                    for idx, photo in enumerate(uploaded_photos):
                         img_bytes = photo.read()
+                        with st.spinner(f"Scanning card {idx+1} of {len(uploaded_photos)}..."):
+                            results = engine.analyze(img_bytes, prompt)
+                            if results:
+                                all_scans.append({"image": img_bytes, "result": results[0].raw, "index": idx})
 
-                        prompt = CARD_IDENTIFIER if scan_mode.startswith("Identify") else CARD_CONDITION_ONLY
-                        results = engine.analyze(img_bytes, prompt)
+                    if all_scans:
+                        st.success(f"Scanned **{len(all_scans)} card(s)**!")
 
-                        if results:
-                            r = results[0].raw
-                            st.success("Card analyzed!")
+                        # Add All button
+                        st.session_state["card_scans"] = all_scans
+                        if st.button("Add ALL to Collection", type="primary", key="add_all_cards"):
+                            conn = get_db()
+                            added = 0
+                            for scan in all_scans:
+                                r = scan["result"]
+                                if r.get("player_name"):
+                                    conn.execute("""INSERT INTO cards (card_number,quantity,year,team,player,
+                                        description,company,value_raw,is_notable,notes,last_updated)
+                                        VALUES (?,1,?,?,?,?,?,?,?,?,?)""",
+                                        (r.get("card_number",""), r.get("year",0), "",
+                                         r.get("player_name",""), r.get("variant",""),
+                                         r.get("card_set",""),
+                                         str(r.get("estimated_value","")) if r.get("estimated_value") else "",
+                                         1 if is_notable(r.get("player_name",""), r.get("year",0)) else 0,
+                                         f"AI Grade: {r.get('overall_grade','?')}/10. {r.get('condition_notes','')}",
+                                         datetime.now().isoformat()))
+                                    added += 1
+                            conn.commit(); conn.close()
+                            st.success(f"Added {added} cards!")
+                            st.session_state.pop("card_scans", None)
+                            st.rerun()
 
-                            # Show the uploaded image
+                        # Show each card
+                        for scan in all_scans:
+                            r = scan["result"]
+                            st.markdown("---")
                             col1, col2 = st.columns([1, 2])
                             with col1:
-                                st.image(img_bytes, width=250)
-
+                                st.image(scan["image"], width=220)
                             with col2:
-                                if "player_name" in r:
-                                    st.markdown(f"### {r.get('player_name','Unknown')} - {r.get('year','')} {r.get('card_set','')}")
-                                    st.markdown(f"**Card #:** {r.get('card_number','')} | **Set:** {r.get('card_set','')} | **Variant:** {r.get('variant','')}")
+                                if r.get("player_name"):
+                                    st.markdown(f"### {r.get('player_name','?')} - {r.get('year','')} {r.get('card_set','')}")
+                                    st.markdown(f"**#** {r.get('card_number','')} | **Set:** {r.get('card_set','')} | **Variant:** {r.get('variant','')}")
 
                                 # Condition grades
-                                st.markdown("---")
-                                st.markdown("### Condition Assessment")
                                 gc = st.columns(5)
-                                grade_items = [
-                                    ("Centering", r.get("centering", r.get("centering_front","?"))),
-                                    ("Corners", r.get("corners","?")),
-                                    ("Edges", r.get("edges","?")),
-                                    ("Surface", r.get("surface", r.get("surface_front","?"))),
-                                    ("Overall", r.get("overall_grade","?")),
-                                ]
-                                for i, (label, val) in enumerate(grade_items):
+                                for i, (label, key) in enumerate([("Center","centering"),("Corners","corners"),("Edges","edges"),("Surface","surface"),("Grade","overall_grade")]):
+                                    val = r.get(key, "?")
                                     with gc[i]:
                                         color = "#2ecc71" if str(val).isdigit() and int(str(val)) >= 8 else "#f39c12" if str(val).isdigit() and int(str(val)) >= 5 else "#e74c3c"
-                                        st.markdown(f"<div style='text-align:center'><span style='font-size:28px;color:{color};font-weight:bold'>{val}</span><br/><small>{label}</small></div>", unsafe_allow_html=True)
+                                        st.markdown(f"<div style='text-align:center'><span style='font-size:24px;color:{color};font-weight:bold'>{val}</span><br/><small>{label}</small></div>", unsafe_allow_html=True)
 
-                                st.markdown(f"**Notes:** {r.get('condition_notes','')}")
-
+                                if r.get("condition_notes"):
+                                    st.caption(r["condition_notes"])
                                 if r.get("estimated_value"):
-                                    st.markdown(f"**Estimated Value:** ${r['estimated_value']} ({r.get('value_confidence','?')} confidence)")
-                                    st.caption(r.get("value_source",""))
-                                elif "player_name" in r:
-                                    st.info("Value not estimated - use the search feature for real market prices.")
+                                    st.markdown(f"**Est. Value:** ${r['estimated_value']} ({r.get('value_confidence','?')})")
 
-                                # Add to collection button
-                                if "player_name" in r:
-                                    if st.button("Add to Collection"):
-                                        conn = get_db()
-                                        conn.execute("""INSERT INTO cards (card_number,quantity,year,team,player,
-                                            description,company,value_raw,is_notable,notes,last_updated)
-                                            VALUES (?,1,?,?,?,?,?,?,?,?,?)""",
-                                            (r.get("card_number",""), r.get("year",0), "",
-                                             r.get("player_name",""),
-                                             f"{r.get('variant','')}",
-                                             r.get("card_set",""),
-                                             str(r.get("estimated_value","")) if r.get("estimated_value") else "",
-                                             1 if is_notable(r.get("player_name",""), r.get("year",0)) else 0,
-                                             f"AI Grade: {r.get('overall_grade','?')}/10. {r.get('condition_notes','')}",
-                                             datetime.now().isoformat()))
-                                        conn.commit(); conn.close()
-                                        st.success("Added to collection!")
-                        else:
-                            st.warning("Could not analyze the image. Try a clearer photo.")
-                    except Exception as e:
-                        st.error(f"Scan error: {e}")
+                                if r.get("player_name") and st.button("Add This Card", key=f"add_card_{scan['index']}"):
+                                    conn = get_db()
+                                    conn.execute("""INSERT INTO cards (card_number,quantity,year,team,player,
+                                        description,company,value_raw,is_notable,notes,last_updated)
+                                        VALUES (?,1,?,?,?,?,?,?,?,?,?)""",
+                                        (r.get("card_number",""), r.get("year",0), "",
+                                         r.get("player_name",""), r.get("variant",""),
+                                         r.get("card_set",""),
+                                         str(r.get("estimated_value","")) if r.get("estimated_value") else "",
+                                         1 if is_notable(r.get("player_name",""), r.get("year",0)) else 0,
+                                         f"AI Grade: {r.get('overall_grade','?')}/10. {r.get('condition_notes','')}",
+                                         datetime.now().isoformat()))
+                                    conn.commit(); conn.close()
+                                    st.success(f"Added {r.get('player_name','')}!")
+                    else:
+                        st.warning("Could not analyze photos. Try clearer images.")
+                except Exception as e:
+                    st.error(f"Scan error: {e}")
 
     # ── TAB 3: Ask AX ──
     with tab3:
