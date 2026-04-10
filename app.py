@@ -128,7 +128,71 @@ def import_tsv_data(text_data):
             (parts[0].strip(), qty, year, team, pos, player, desc, company, loc, value, 1 if notable else 0))
         count += 1
     conn.commit(); conn.close()
+
+    # Auto-apply pre-researched prices
+    apply_known_prices()
+
     return count, notable_count
+
+def apply_known_prices():
+    """Match imported cards against pre-researched price database."""
+    price_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "notable_card_values.csv")
+    if not os.path.exists(price_file):
+        return
+
+    conn = get_db()
+    matched = 0
+    with open(price_file, 'r') as f:
+        import csv as csvmod
+        reader = csvmod.DictReader(f)
+        for row in reader:
+            year = int(row.get("year", 0))
+            player = row.get("player", "").strip()
+            card_num = row.get("card_number", "").strip()
+            company_hint = row.get("company", "").lower().strip()
+
+            if not player or not year:
+                continue
+
+            # Match by year + player name (fuzzy) + optional card number
+            query = "UPDATE cards SET value_raw=COALESCE(NULLIF(value_raw,''), ?), value_psa8=?, value_psa9=?, value_psa10=?, value_source=? WHERE year=? AND LOWER(player) LIKE ?"
+            params = [
+                row.get("raw_value", ""),
+                row.get("psa_8", ""),
+                row.get("psa_9", ""),
+                row.get("psa_10", ""),
+                row.get("source", "pre-researched"),
+                year,
+                f"%{player.lower()}%"
+            ]
+
+            # Add card number filter if we have one
+            if card_num:
+                query += " AND card_number=?"
+                params.append(card_num)
+
+            # Add company filter - handle name variants
+            if company_hint:
+                co_variants = {
+                    "topps": ["topps", "t.c.g", "t.c.g."],
+                    "bowman": ["bowman"],
+                    "donruss": ["donruss"],
+                    "fleer": ["fleer"],
+                    "hostess": ["hostess"],
+                    "kellogg": ["kellogg"],
+                    "o-pee-chee": ["o-pee-chee"],
+                }
+                variants = co_variants.get(company_hint, [company_hint])
+                co_clauses = " OR ".join(["LOWER(company) LIKE ?" for _ in variants])
+                query += f" AND ({co_clauses})"
+                params.extend([f"%{v}%" for v in variants])
+
+            conn.execute(query, params)
+            matched += conn.execute("SELECT changes()").fetchone()[0]
+
+    conn.commit()
+    conn.close()
+    return matched
 
 def get_stats():
     conn = get_db(); c = conn.cursor()
