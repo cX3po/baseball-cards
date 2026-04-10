@@ -319,10 +319,31 @@ Include:
 Format it so it can be copy-pasted directly into eBay."""
     return chat_with_ax(prompt, app_type="baseball")
 
+# ── Family Login ─────────────────────────────────────────────────────────────
+
+def family_login():
+    """Simple family sign-in so AX knows who's talking."""
+    if "user_name" not in st.session_state:
+        st.session_state.user_name = ""
+
+    if not st.session_state.user_name:
+        st.markdown("## Welcome to the Baseball Card Collection")
+        st.markdown("**Sign in so AX knows who you are:**")
+        name = st.text_input("Your name", placeholder="e.g. Dad, Phil, Colin, Julie")
+        if name and st.button("Sign In", type="primary"):
+            st.session_state.user_name = name
+            st.rerun()
+        st.stop()
+
+    return st.session_state.user_name
+
 # ── Main App ─────────────────────────────────────────────────────────────────
 
 def main():
     st.set_page_config(page_title="Phil's Baseball Cards", page_icon="\u26be", layout="wide")
+
+    # Family login
+    user_name = family_login()
 
     # Custom title
     if "app_title" not in st.session_state:
@@ -335,6 +356,10 @@ def main():
 
     # Sidebar
     with st.sidebar:
+        st.markdown(f"**Signed in as:** {user_name}")
+        if st.button("Sign Out", key="signout"):
+            st.session_state.user_name = ""
+            st.rerun()
         # Editable title
         new_title = st.text_input("Collection Title", st.session_state.app_title)
         if new_title != st.session_state.app_title:
@@ -604,7 +629,7 @@ def main():
 
             with st.chat_message("assistant", avatar="\U0001f916"):
                 with st.spinner("AX is thinking..."):
-                    context = f"Collection has {stats['total']} cards, spanning {stats['years'][0] if stats['years'] else '?'} to {stats['years'][-1] if stats['years'] else '?'}. Companies: {', '.join(stats['companies'][:5])}."
+                    context = f"You're talking to {user_name}. Collection has {stats['total']} cards, spanning {stats['years'][0] if stats['years'] else '?'} to {stats['years'][-1] if stats['years'] else '?'}. Companies: {', '.join(stats['companies'][:5])}."
                     response = chat_with_ax(prompt, context, history=st.session_state.chat_history, app_type="baseball")
                     st.markdown(response)
                     st.session_state.chat_history.append({"role": "assistant", "content": response})
