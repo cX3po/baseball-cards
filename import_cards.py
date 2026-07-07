@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import Phil's baseball card spreadsheet into SQLite."""
+"""Import the family baseball card spreadsheet into SQLite."""
 import sqlite3
 import os
 import csv

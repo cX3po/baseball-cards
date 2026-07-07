@@ -1,6 +1,8 @@
 venv/
+.venv/
 __pycache__/
 *.pyc
 #db/cards.db  # pre-loaded with 8580 cards
 .env
 *.log
+data/letter_to_dad.md

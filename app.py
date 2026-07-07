@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phil's Baseball Card Finder - Full Featured App"""
+"""Family Baseball Card Finder - Full Featured App"""
 import streamlit as st
 import sqlite3
 import os
@@ -13,11 +13,13 @@ from datetime import datetime
 
 # Load API key - check Streamlit secrets, then axiom .env, then env var
 def load_api_key():
-    # Streamlit Cloud secrets
+    # Streamlit Cloud secrets — best-effort: no secrets.toml raises, and any
+    # parse issue should fall through to the .env / env-var loaders below.
     try:
         key = st.secrets.get("ANTHROPIC_API_KEY", "")
         if key: return key
-    except: pass
+    except Exception:
+        pass
     # Local axiom .env
     env_path = os.path.expanduser("~/axiom/.env")
     if os.path.exists(env_path):
@@ -32,6 +34,51 @@ if API_KEY:
     os.environ["ANTHROPIC_API_KEY"] = API_KEY
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "cards.db")
+
+# ── Runtime family/identity hints (privacy: no hardcoded personal names) ─────
+FAMILY_CONFIG_PATH = os.path.expanduser("~/axiom/config/family_members.json")
+IDENTITY_CONFIG_PATH = os.path.expanduser("~/axiom/config/identity.json")
+_FAMILY_HINTS_CACHE = None
+
+
+def _load_family_hints():
+    """Pull display-only hints (collection title + sign-in placeholder) from
+    the family config when present. Falls back to generic strings so the
+    card app still runs standalone outside the axiom directory tree.
+
+    Privacy refactor (ported from the train-collection app): previous versions
+    hardcoded family first names in user-facing copy. The hints are optional —
+    a deployer without the config files gets a fully generic install.
+    """
+    global _FAMILY_HINTS_CACHE
+    if _FAMILY_HINTS_CACHE is not None:
+        return _FAMILY_HINTS_CACHE
+    hints = {
+        "title": "Family Baseball Cards",
+        "long_title": "Family Baseball Card Collection",
+        "placeholder": "e.g. Dad",
+    }
+    try:
+        if os.path.exists(FAMILY_CONFIG_PATH):
+            data = json.loads(open(FAMILY_CONFIG_PATH).read())
+            names = [m.get("name", "").split()[0]
+                     for m in data.get("members", {}).values()
+                     if m.get("name")]
+            if names:
+                hints["placeholder"] = "e.g. " + ", ".join(names[:3])
+    except Exception as e:
+        print(f"[family_hints] non-fatal load issue: {e}")
+    try:
+        if os.path.exists(IDENTITY_CONFIG_PATH):
+            ident = json.loads(open(IDENTITY_CONFIG_PATH).read())
+            owner_first = (ident.get("owner") or "").split()[0] if ident.get("owner") else ""
+            if owner_first:
+                hints["title"] = f"{owner_first}'s Baseball Cards"
+                hints["long_title"] = f"{owner_first}'s Baseball Card Collection"
+    except Exception:
+        pass
+    _FAMILY_HINTS_CACHE = hints
+    return hints
 
 NOTABLE_NAMES = {
     "ted williams","sandy koufax","yogi berra","ernie banks","whitey ford",
@@ -113,9 +160,9 @@ def import_tsv_data(text_data):
         if len(parts) < 3: continue
         while len(parts) < 11: parts.append("")
         try: qty = int(parts[1].strip() or "1")
-        except: qty = 1
+        except (ValueError, TypeError): qty = 1
         try: year = int(parts[2].strip() or "0")
-        except: year = 0
+        except (ValueError, TypeError): year = 0
         team, pos, player = parts[3].strip(), parts[4].strip(), parts[5].strip()
         desc, company, loc = parts[6].strip(), parts[7].strip(), parts[8].strip()
         value = parts[9].strip() if len(parts) > 9 else ""
@@ -259,7 +306,7 @@ PHOTO_GUIDE_SVG = """
 # ── AI Chat Helper ───────────────────────────────────────────────────────────
 
 def chat_with_ax(message, context="", history=None, app_type="baseball"):
-    """Send a chat message to AX - Phil's family AI assistant."""
+    """Send a chat message to AX - the family AI assistant."""
     import requests
     if not API_KEY:
         return "No API key found. Add your ANTHROPIC_API_KEY in the app settings."
@@ -329,7 +376,7 @@ def family_login():
     if not st.session_state.user_name:
         st.markdown("## Welcome to the Baseball Card Collection")
         st.markdown("**Sign in so AX knows who you are:**")
-        name = st.text_input("Your name", placeholder="e.g. Dad, Phil, Colin, Julie")
+        name = st.text_input("Your name", placeholder=_load_family_hints()["placeholder"])
         if name and st.button("Sign In", type="primary"):
             st.session_state.user_name = name
             st.rerun()
@@ -340,14 +387,14 @@ def family_login():
 # ── Main App ─────────────────────────────────────────────────────────────────
 
 def main():
-    st.set_page_config(page_title="Phil's Baseball Cards", page_icon="\u26be", layout="wide")
+    st.set_page_config(page_title=_load_family_hints()["title"], page_icon="\u26be", layout="wide")
 
     # Family login
     user_name = family_login()
 
     # Custom title
     if "app_title" not in st.session_state:
-        st.session_state.app_title = "Phil's Baseball Card Collection"
+        st.session_state.app_title = _load_family_hints()["long_title"]
 
     st.title(st.session_state.app_title)
 

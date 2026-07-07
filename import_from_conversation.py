@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Import Phil's cards from stdin (tab-separated).
+Import the family cards from stdin (tab-separated).
 Usage: paste spreadsheet data | python import_from_conversation.py
 Or: python import_from_conversation.py < data/phils_cards.tsv
 """

@@ -1,4 +1,4 @@
-"""Save Phil's card data directly into SQLite from hardcoded notable values."""
+"""Save the family card data directly into SQLite from hardcoded notable values."""
 import sqlite3
 import os
 
